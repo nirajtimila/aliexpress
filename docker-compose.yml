@@ -1,7 +1,7 @@
 services:
-  aliexpress-collector-v4:
+  aliexpress-collector-v5:
     build: https://github.com/nirajtimila/aliexpress.git#main
-    image: aliexpress-collector:v4
+    image: aliexpress-collector:v5
     pull_policy: build
     container_name: aliexpress-coins
     restart: unless-stopped

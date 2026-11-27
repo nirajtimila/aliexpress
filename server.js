@@ -1114,6 +1114,30 @@ async function openExactMobileWindow() {
         return;
     }
 
+    // Helper: Locate slider handle & track across main page and cross-origin iframes
+    async function findSliderCoordinates(page) {
+        for (const frame of page.frames()) {
+            try {
+                const selectors = ['#nc_1_n1z', '.btn_slide', '.nc_iconfont.btn_slide', '[class*="btn_slide"]', '#nc_2_n1z'];
+                for (const sel of selectors) {
+                    const handle = await frame.$(sel);
+                    if (handle) {
+                        const box = await handle.boundingBox();
+                        if (box && box.width >= 15 && box.height >= 15) {
+                            const track = await frame.$('.nc_scale, #nc_1_wrapper, .nc-container, .slidetounlock');
+                            const trackBox = track ? await track.boundingBox() : null;
+                            const startX = Math.round(box.x + box.width / 2);
+                            const startY = Math.round(box.y + box.height / 2);
+                            const endX = trackBox ? Math.round(trackBox.x + trackBox.width - box.width / 2 + 6) : startX + 255;
+                            return { startX, startY, endX };
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+        return { startX: 100, startY: 478, endX: 355 };
+    }
+
     // API: Dispatch User Interaction (Click, Drag, Type, Key, Scroll, Navigate)
     if (pathname === '/api/interactive/input') {
         if (!interactiveSession.active || !interactiveSession.page) {
@@ -1300,9 +1324,10 @@ async function openExactMobileWindow() {
                 } else if (data.action === 'slide_percentage') {
                     const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
                     const pct = Math.max(0, Math.min(100, Number(data.percentage) || 0));
-                    const startX = 95;
-                    const startY = 625;
-                    const endX = 355;
+                    if (pct === 0 || !interactiveSession.sliderBounds) {
+                        interactiveSession.sliderBounds = await findSliderCoordinates(p);
+                    }
+                    const { startX, startY, endX } = interactiveSession.sliderBounds;
                     const curX = Math.round(startX + (endX - startX) * (pct / 100));
                     const curY = startY;
 
@@ -1313,19 +1338,12 @@ async function openExactMobileWindow() {
                                 touchPoints: [{ x: startX, y: startY }]
                             });
                         } catch(e) {}
-                        try {
-                            await p.mouse.move(startX, startY);
-                            await p.mouse.down();
-                        } catch(e) {}
                     } else if (pct < 100) {
                         try {
                             await client.send('Input.dispatchTouchEvent', {
                                 type: 'touchMove',
                                 touchPoints: [{ x: curX, y: curY }]
                             });
-                        } catch(e) {}
-                        try {
-                            await p.mouse.move(curX, curY);
                         } catch(e) {}
                     } else {
                         try {
@@ -1334,50 +1352,26 @@ async function openExactMobileWindow() {
                                 touchPoints: [{ x: endX, y: curY }]
                             });
                         } catch(e) {}
-                        try {
-                            await p.mouse.move(endX, curY);
-                        } catch(e) {}
-                        await new Promise(r => setTimeout(r, 100));
+                        await new Promise(r => setTimeout(r, 120));
                         try {
                             await client.send('Input.dispatchTouchEvent', {
                                 type: 'touchEnd',
                                 touchPoints: []
                             });
                         } catch(e) {}
-                        try {
-                            await p.mouse.up();
-                        } catch(e) {}
+                        interactiveSession.sliderBounds = null;
                     }
                 } else if (data.action === 'auto_slide' || data.action === 'drag') {
-                    // Coordinates: auto-slide uses default slider positions; drag uses passed coordinates
                     let startX = data.startX;
                     let startY = data.startY;
                     let endX = data.endX;
                     let endY = data.endY;
 
                     if (data.action === 'auto_slide' || !startX) {
-                        // Inspect DOM or iframe for slider handle
-                        const sliderBox = await p.evaluate(() => {
-                            const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
-                                const cls = el.className ? String(el.className) : '';
-                                const id = el.id ? String(el.id) : '';
-                                const txt = (el.innerText || '').trim();
-                                return id.includes('n1z') || id.includes('btn') || cls.includes('btn_slide') || cls.includes('slide') || txt === '>>' || txt === '>';
-                            });
-
-                            for (const el of candidates) {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width >= 20 && rect.width <= 110 && rect.height >= 20 && rect.top > 100) {
-                                    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-                                }
-                            }
-                            // Exact position of the >> slider button on mobile AliExpress login: x=95, y=625
-                            return { x: 95, y: 625 };
-                        });
-
-                        startX = Math.round(sliderBox.x || 95);
-                        startY = Math.round(sliderBox.y || 625);
-                        endX = startX + 265;
+                        const bounds = await findSliderCoordinates(p);
+                        startX = bounds.startX;
+                        startY = bounds.startY;
+                        endX = bounds.endX;
                         endY = startY;
                     }
 
@@ -1388,24 +1382,22 @@ async function openExactMobileWindow() {
 
                     const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
 
-                    // 1. TouchStart + MouseDown
+                    // 1. TouchStart (touch-only for mobile emulation)
                     try {
                         await client.send('Input.dispatchTouchEvent', {
                             type: 'touchStart',
                             touchPoints: [{ x: startX, y: startY }]
                         });
                     } catch(e) {}
-                    try {
-                        await p.mouse.move(startX, startY);
-                        await p.mouse.down();
-                    } catch(e) {}
+                    await new Promise(r => setTimeout(r, 60 + Math.floor(Math.random() * 40)));
 
-                    // 2. Smooth human-like TouchMove + MouseMove with easing and slight jitter
-                    const steps = 32;
+                    // 2. Human-like eased TouchMove (fast start, natural deceleration, slight Y arc)
+                    const steps = 28;
                     for (let i = 1; i <= steps; i++) {
-                        const progress = i / steps;
-                        const curX = Math.round(startX + (endX - startX) * progress);
-                        const curY = Math.round(startY + Math.sin(progress * Math.PI) * 2);
+                        const t = i / steps;
+                        const eased = 1 - Math.pow(1 - t, 3);
+                        const curX = Math.round(startX + (endX - startX) * eased);
+                        const curY = Math.round(startY + Math.sin(t * Math.PI) * 3);
 
                         try {
                             await client.send('Input.dispatchTouchEvent', {
@@ -1413,16 +1405,13 @@ async function openExactMobileWindow() {
                                 touchPoints: [{ x: curX, y: curY }]
                             });
                         } catch(e) {}
-                        try {
-                            await p.mouse.move(curX, curY);
-                        } catch(e) {}
 
-                        await new Promise(r => setTimeout(r, 12 + Math.floor(Math.random() * 8)));
+                        await new Promise(r => setTimeout(r, 14 + Math.floor(Math.random() * 18)));
                     }
 
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 140));
 
-                    // 3. TouchEnd + MouseUp
+                    // 3. TouchEnd
                     try {
                         await client.send('Input.dispatchTouchEvent', {
                             type: 'touchEnd',

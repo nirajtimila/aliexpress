@@ -215,7 +215,9 @@
                 const img = frameImgRef.current;
                 const rect = img.getBoundingClientRect();
 
-                const imgAspect = 440 / 956;
+                const natW = img.naturalWidth || 440;
+                const natH = img.naturalHeight || 763;
+                const imgAspect = natW / natH;
                 const elemAspect = rect.width / rect.height;
 
                 let renderedWidth = rect.width;
@@ -241,8 +243,8 @@
                     return null;
                 }
 
-                const scaleX = 440 / renderedWidth;
-                const scaleY = 956 / renderedHeight;
+                const scaleX = natW / renderedWidth;
+                const scaleY = natH / renderedHeight;
                 return {
                     x: Math.round(clickX * scaleX),
                     y: Math.round(clickY * scaleY)
