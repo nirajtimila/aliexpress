@@ -1,0 +1,8 @@
+node_modules/
+chrome_mobile_session/
+chrome_session/
+chrome_mobile_profile/
+*.log
+*.png
+.gemini/
+.env
