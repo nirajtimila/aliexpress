@@ -11,10 +11,4 @@ services:
       - NODE_ENV=production
       - DOCKER=true
       - PORT=3333
-      - TZ=Australia/Sydney    # Change to your timezone (e.g. America/New_York, Asia/Kathmandu, UTC)
-    volumes:
-      # Persistent storage: mounts your authenticated cookies, account state, and logs
-      - ./session_cookies.json:/app/session_cookies.json
-      - ./account.json:/app/account.json
-      - ./activity_history.json:/app/activity_history.json
-      - ./collector_activity.log:/app/collector_activity.log
+      - TZ=Australia/Sydney
