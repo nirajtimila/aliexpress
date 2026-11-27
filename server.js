@@ -43,7 +43,6 @@ if (fs.existsSync(ACCOUNT_FILE)) {
         const savedAcc = JSON.parse(fs.readFileSync(ACCOUNT_FILE, 'utf8'));
         if (savedAcc && (savedAcc.email || savedAcc.coins)) {
             accountDetails = { ...accountDetails, ...savedAcc };
-            isConnected = true;
         }
     } catch(e) {}
 }
@@ -108,7 +107,7 @@ if (fs.existsSync(COOKIES_FILE)) {
     try {
         const savedCookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
         const acc = parseAccountCookies(savedCookies);
-        if (acc.email || acc.userId || savedCookies.length > 0) {
+        if (Array.isArray(savedCookies) && savedCookies.length > 0 && (acc.hasAuthToken || acc.email || acc.userId)) {
             isConnected = true;
             if (acc.email && (!accountDetails.email || accountDetails.email.includes('/'))) {
                 accountDetails.email = acc.email.includes('/') ? 'nirajtimilatube' : acc.email;
@@ -431,7 +430,13 @@ async function startInteractiveSession(startUrl = null) {
         } catch(e) {}
     });
 
-    const targetUrl = startUrl || 'https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302';
+    // 100% Clean Session: Wipe any cookies or cache so user can log in with ANY account cleanly
+    try {
+        await cdpClient.send('Network.clearBrowserCookies');
+        await cdpClient.send('Network.clearBrowserCache');
+    } catch(e) {}
+
+    const targetUrl = startUrl || 'https://login.aliexpress.com/?return_url=https%3A%2F%2Fm.aliexpress.com%2Fp%2Fcoin-index%2Findex.html%3F_immersiveMode%3Dtrue%26from%3Dpc302';
     page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
 
     // Polling loop to detect login completion
@@ -830,13 +835,11 @@ async function runAutoCollect() {
 async function disconnectAccount() {
     addLog("Disconnecting AliExpress account...", "info");
     await closeCurrentBrowser();
+    await stopInteractiveSession();
 
-    if (fs.existsSync(COOKIES_FILE)) {
-        try { fs.unlinkSync(COOKIES_FILE); } catch(e) {}
-    }
-    if (fs.existsSync(ACCOUNT_FILE)) {
-        try { fs.unlinkSync(ACCOUNT_FILE); } catch(e) {}
-    }
+    // Overwrite with empty data so it never gets restored on reload
+    try { fs.writeFileSync(COOKIES_FILE, JSON.stringify([], null, 2)); } catch(e) {}
+    try { fs.writeFileSync(ACCOUNT_FILE, JSON.stringify({ email: null, coins: null, worth: null, streak: null }, null, 2)); } catch(e) {}
 
     isConnected = false;
     isBusy = false;
@@ -852,7 +855,7 @@ async function disconnectAccount() {
         lastCollected: null
     };
 
-    addLog("✓ Account disconnected and session cleared.", "warn");
+    addLog("✓ Account disconnected and session cleared completely.", "warn");
     return { success: true };
 }
 
