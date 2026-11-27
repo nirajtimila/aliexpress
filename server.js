@@ -896,7 +896,10 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/' || pathname === '/index.html') {
         const htmlPath = path.join(__dirname, 'public', 'index.html');
         if (fs.existsSync(htmlPath)) {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.writeHead(200, { 
+                'Content-Type': 'text/html; charset=utf-8',
+                'Cache-Control': 'no-cache, no-store, must-revalidate'
+            });
             res.end(fs.readFileSync(htmlPath, 'utf8'));
             return;
         }
