@@ -835,6 +835,8 @@
                                                             src={`data:image/jpeg;base64,${interactiveFrame}`}
                                                             onMouseDown={handleMouseDown}
                                                             onMouseUp={handleMouseUp}
+                                                            onTouchStart={(e) => { if (e.touches[0]) handleMouseDown(e.touches[0]); }}
+                                                            onTouchEnd={(e) => { if (e.changedTouches[0]) handleMouseUp(e.changedTouches[0]); }}
                                                             alt="AliExpress Live Virtual Screen"
                                                             className="w-full h-full object-contain cursor-pointer select-none"
                                                             draggable={false}

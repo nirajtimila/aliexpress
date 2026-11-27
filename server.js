@@ -1168,52 +1168,90 @@ async function openExactMobileWindow() {
                     await p.keyboard.press(data.key);
                 } else if (data.action === 'scroll') {
                     await p.mouse.wheel({ deltaY: data.deltaY || 200 });
-                } else if (data.action === 'auto_slide') {
-                    // Automatically find slider handle and drag across smoothly
-                    const sliderBox = await p.evaluate(() => {
-                        const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
-                            const cls = el.className ? String(el.className) : '';
-                            const id = el.id ? String(el.id) : '';
-                            const txt = (el.innerText || '').trim();
-                            return id.includes('n1z') || id.includes('btn') || cls.includes('btn_slide') || cls.includes('slide') || txt === '>>' || txt === '>';
+                } else if (data.action === 'auto_slide' || data.action === 'drag') {
+                    // Coordinates: auto-slide uses default slider positions; drag uses passed coordinates
+                    let startX = data.startX;
+                    let startY = data.startY;
+                    let endX = data.endX;
+                    let endY = data.endY;
+
+                    if (data.action === 'auto_slide' || !startX) {
+                        // Inspect DOM or iframe for slider handle
+                        const sliderBox = await p.evaluate(() => {
+                            const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
+                                const cls = el.className ? String(el.className) : '';
+                                const id = el.id ? String(el.id) : '';
+                                const txt = (el.innerText || '').trim();
+                                return id.includes('n1z') || id.includes('btn') || cls.includes('btn_slide') || cls.includes('slide') || txt === '>>' || txt === '>';
+                            });
+
+                            for (const el of candidates) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.width >= 20 && rect.width <= 110 && rect.height >= 20 && rect.top > 100) {
+                                    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+                                }
+                            }
+                            // Exact position of the >> slider button on mobile AliExpress login: x=95, y=625
+                            return { x: 95, y: 625 };
                         });
 
-                        for (const el of candidates) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width >= 20 && rect.width <= 110 && rect.height >= 20 && rect.top > 100) {
-                                return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-                            }
-                        }
-                        return { x: 80, y: 590 };
-                    });
+                        startX = Math.round(sliderBox.x || 95);
+                        startY = Math.round(sliderBox.y || 625);
+                        endX = startX + 265;
+                        endY = startY;
+                    }
 
-                    const startX = Math.round(sliderBox.x || 80);
-                    const startY = Math.round(sliderBox.y || 590);
-                    const endX = startX + 280;
+                    startX = Math.round(startX);
+                    startY = Math.round(startY);
+                    endX = Math.round(endX);
+                    endY = Math.round(endY);
 
-                    await p.mouse.move(startX, startY);
-                    await p.mouse.down();
-                    const steps = 35;
+                    const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
+
+                    // 1. TouchStart + MouseDown
+                    try {
+                        await client.send('Input.dispatchTouchEvent', {
+                            type: 'touchStart',
+                            touchPoints: [{ x: startX, y: startY }]
+                        });
+                    } catch(e) {}
+                    try {
+                        await p.mouse.move(startX, startY);
+                        await p.mouse.down();
+                    } catch(e) {}
+
+                    // 2. Smooth human-like TouchMove + MouseMove with easing and slight jitter
+                    const steps = 32;
                     for (let i = 1; i <= steps; i++) {
                         const progress = i / steps;
                         const curX = Math.round(startX + (endX - startX) * progress);
                         const curY = Math.round(startY + Math.sin(progress * Math.PI) * 2);
-                        await p.mouse.move(curX, curY);
+
+                        try {
+                            await client.send('Input.dispatchTouchEvent', {
+                                type: 'touchMove',
+                                touchPoints: [{ x: curX, y: curY }]
+                            });
+                        } catch(e) {}
+                        try {
+                            await p.mouse.move(curX, curY);
+                        } catch(e) {}
+
                         await new Promise(r => setTimeout(r, 12 + Math.floor(Math.random() * 8)));
                     }
-                    await new Promise(r => setTimeout(r, 120));
-                    await p.mouse.up();
-                } else if (data.action === 'drag') {
-                    await p.mouse.move(data.startX, data.startY);
-                    await p.mouse.down();
-                    const steps = 12;
-                    for (let i = 1; i <= steps; i++) {
-                        const cx = data.startX + (data.endX - data.startX) * (i / steps);
-                        const cy = data.startY + (data.endY - data.startY) * (i / steps);
-                        await p.mouse.move(cx, cy);
-                        await new Promise(r => setTimeout(r, 20));
-                    }
-                    await p.mouse.up();
+
+                    await new Promise(r => setTimeout(r, 100));
+
+                    // 3. TouchEnd + MouseUp
+                    try {
+                        await client.send('Input.dispatchTouchEvent', {
+                            type: 'touchEnd',
+                            touchPoints: []
+                        });
+                    } catch(e) {}
+                    try {
+                        await p.mouse.up();
+                    } catch(e) {}
                 } else if (data.action === 'navigate') {
                     if (data.url) {
                         await p.goto(data.url, { waitUntil: 'domcontentloaded' });
