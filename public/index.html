@@ -206,6 +206,9 @@
             };
 
             const [dragStart, setDragStart] = useState(null);
+            const [isDragging, setIsDragging] = useState(false);
+            const [sliderVal, setSliderVal] = useState(0);
+            const lastMoveTimeRef = React.useRef(0);
 
             const getCanvasCoords = (e) => {
                 if (!frameImgRef.current) return null;
@@ -228,8 +231,11 @@
                     offsetY = (rect.height - renderedHeight) / 2;
                 }
 
-                const clickX = e.clientX - rect.left - offsetX;
-                const clickY = e.clientY - rect.top - offsetY;
+                const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : 0));
+                const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : (e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientY : 0));
+
+                const clickX = clientX - rect.left - offsetX;
+                const clickY = clientY - rect.top - offsetY;
 
                 if (clickX < 0 || clickX > renderedWidth || clickY < 0 || clickY > renderedHeight) {
                     return null;
@@ -245,25 +251,31 @@
 
             const handleMouseDown = (e) => {
                 const coords = getCanvasCoords(e);
-                if (coords) setDragStart(coords);
+                if (coords) {
+                    setIsDragging(true);
+                    setDragStart(coords);
+                    sendInteractiveInput({ action: 'down', x: coords.x, y: coords.y });
+                }
+            };
+
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+                const now = Date.now();
+                if (now - lastMoveTimeRef.current < 25) return;
+                lastMoveTimeRef.current = now;
+
+                const coords = getCanvasCoords(e);
+                if (coords) {
+                    sendInteractiveInput({ action: 'move', x: coords.x, y: coords.y });
+                }
             };
 
             const handleMouseUp = (e) => {
-                if (!dragStart) return;
-                const coords = getCanvasCoords(e);
+                if (!isDragging) return;
+                setIsDragging(false);
+                const coords = getCanvasCoords(e) || dragStart;
                 if (coords) {
-                    const dist = Math.hypot(coords.x - dragStart.x, coords.y - dragStart.y);
-                    if (dist > 15) {
-                        sendInteractiveInput({
-                            action: 'drag',
-                            startX: dragStart.x,
-                            startY: dragStart.y,
-                            endX: coords.x,
-                            endY: coords.y
-                        });
-                    } else {
-                        sendInteractiveInput({ action: 'click', x: coords.x, y: coords.y });
-                    }
+                    sendInteractiveInput({ action: 'up', x: coords.x, y: coords.y });
                 }
                 setDragStart(null);
             };
@@ -834,8 +846,10 @@
                                                             ref={frameImgRef}
                                                             src={`data:image/jpeg;base64,${interactiveFrame}`}
                                                             onMouseDown={handleMouseDown}
+                                                            onMouseMove={handleMouseMove}
                                                             onMouseUp={handleMouseUp}
                                                             onTouchStart={(e) => { if (e.touches[0]) handleMouseDown(e.touches[0]); }}
+                                                            onTouchMove={(e) => { if (e.touches[0]) handleMouseMove(e.touches[0]); }}
                                                             onTouchEnd={(e) => { if (e.changedTouches[0]) handleMouseUp(e.changedTouches[0]); }}
                                                             alt="AliExpress Live Virtual Screen"
                                                             className="w-full h-full object-contain cursor-pointer select-none"
@@ -926,13 +940,50 @@
                                                     </div>
                                                 </div>
 
-                                                <div className="pt-2 border-t border-slate-800 space-y-2">
+                                                <div className="pt-2 border-t border-slate-800 space-y-2.5">
                                                     <button
                                                         onClick={() => sendInteractiveInput({ action: 'auto_slide' })}
                                                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
                                                         title="Automatically slides the verification puzzle slider from left to right">
                                                         <span>➡️ ✨ Auto-Slide to Verify</span>
                                                     </button>
+
+                                                    {/* Manual Draggable HTML Slider */}
+                                                    <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-700/80 space-y-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <span className="text-[11px] font-bold text-amber-300">🎚️ Manual Slider Drag (0% → 100%)</span>
+                                                            <span className="text-[11px] font-mono text-emerald-400 font-bold">{sliderVal}%</span>
+                                                        </div>
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="100"
+                                                            value={sliderVal}
+                                                            onChange={(e) => {
+                                                                const val = Number(e.target.value);
+                                                                setSliderVal(val);
+                                                                sendInteractiveInput({ action: 'slide_percentage', percentage: val });
+                                                            }}
+                                                            onMouseUp={() => {
+                                                                if (sliderVal < 95) {
+                                                                    sendInteractiveInput({ action: 'slide_percentage', percentage: 100 });
+                                                                    setSliderVal(100);
+                                                                }
+                                                            }}
+                                                            onTouchEnd={() => {
+                                                                if (sliderVal < 95) {
+                                                                    sendInteractiveInput({ action: 'slide_percentage', percentage: 100 });
+                                                                    setSliderVal(100);
+                                                                }
+                                                            }}
+                                                            className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                                        />
+                                                        <div className="flex justify-between text-[9px] text-slate-500">
+                                                            <span>Left (Start)</span>
+                                                            <span>👉 Drag to the Right to Solve</span>
+                                                            <span>Right (Verify)</span>
+                                                        </div>
+                                                    </div>
 
                                                     <div className="flex flex-wrap gap-2">
                                                         <button

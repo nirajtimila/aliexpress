@@ -1168,6 +1168,91 @@ async function openExactMobileWindow() {
                     await p.keyboard.press(data.key);
                 } else if (data.action === 'scroll') {
                     await p.mouse.wheel({ deltaY: data.deltaY || 200 });
+                } else if (data.action === 'down') {
+                    const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
+                    try {
+                        await client.send('Input.dispatchTouchEvent', {
+                            type: 'touchStart',
+                            touchPoints: [{ x: Math.round(data.x), y: Math.round(data.y) }]
+                        });
+                    } catch(e) {}
+                    try {
+                        await p.mouse.move(Math.round(data.x), Math.round(data.y));
+                        await p.mouse.down();
+                    } catch(e) {}
+                } else if (data.action === 'move') {
+                    const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
+                    try {
+                        await client.send('Input.dispatchTouchEvent', {
+                            type: 'touchMove',
+                            touchPoints: [{ x: Math.round(data.x), y: Math.round(data.y) }]
+                        });
+                    } catch(e) {}
+                    try {
+                        await p.mouse.move(Math.round(data.x), Math.round(data.y));
+                    } catch(e) {}
+                } else if (data.action === 'up') {
+                    const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
+                    try {
+                        await client.send('Input.dispatchTouchEvent', {
+                            type: 'touchEnd',
+                            touchPoints: []
+                        });
+                    } catch(e) {}
+                    try {
+                        await p.mouse.up();
+                    } catch(e) {}
+                } else if (data.action === 'slide_percentage') {
+                    const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
+                    const pct = Math.max(0, Math.min(100, Number(data.percentage) || 0));
+                    const startX = 95;
+                    const startY = 625;
+                    const endX = 355;
+                    const curX = Math.round(startX + (endX - startX) * (pct / 100));
+                    const curY = startY;
+
+                    if (pct === 0) {
+                        try {
+                            await client.send('Input.dispatchTouchEvent', {
+                                type: 'touchStart',
+                                touchPoints: [{ x: startX, y: startY }]
+                            });
+                        } catch(e) {}
+                        try {
+                            await p.mouse.move(startX, startY);
+                            await p.mouse.down();
+                        } catch(e) {}
+                    } else if (pct < 100) {
+                        try {
+                            await client.send('Input.dispatchTouchEvent', {
+                                type: 'touchMove',
+                                touchPoints: [{ x: curX, y: curY }]
+                            });
+                        } catch(e) {}
+                        try {
+                            await p.mouse.move(curX, curY);
+                        } catch(e) {}
+                    } else {
+                        try {
+                            await client.send('Input.dispatchTouchEvent', {
+                                type: 'touchMove',
+                                touchPoints: [{ x: endX, y: curY }]
+                            });
+                        } catch(e) {}
+                        try {
+                            await p.mouse.move(endX, curY);
+                        } catch(e) {}
+                        await new Promise(r => setTimeout(r, 100));
+                        try {
+                            await client.send('Input.dispatchTouchEvent', {
+                                type: 'touchEnd',
+                                touchPoints: []
+                            });
+                        } catch(e) {}
+                        try {
+                            await p.mouse.up();
+                        } catch(e) {}
+                    }
                 } else if (data.action === 'auto_slide' || data.action === 'drag') {
                     // Coordinates: auto-slide uses default slider positions; drag uses passed coordinates
                     let startX = data.startX;
