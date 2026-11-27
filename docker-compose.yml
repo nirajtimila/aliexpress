@@ -1,7 +1,6 @@
 services:
   aliexpress-collector:
     build: .
-    image: aliexpress-collector:v8
     container_name: aliexpress-coins
     restart: unless-stopped
     ports:
