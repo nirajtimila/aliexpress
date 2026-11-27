@@ -234,17 +234,20 @@
                 } catch (e) {}
             };
 
-            // Launch the exact standalone mobile window with iPhone UA via desktop integration
-            const handleOpenNativeMobile = async () => {
-                if (status.isDocker) {
-                    alert("🐳 Docker / Server Mode Active!\n\nYour server runs Chromium headlessly in memory without a physical monitor.\n\nTo claim coins, click the green 'Collect & Sync Now' button or let the 3-hour auto-scheduler run automatically in the background.");
-                    return;
+            // Open Exact Mobile Screen as a Pop-up directly in your local browser!
+            const handleOpenPopup = () => {
+                const url = 'https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302';
+                const popup = window.open(url, 'AliExpressMobile', 'width=440,height=956,left=250,top=40,menubar=no,toolbar=no,location=yes,status=no,resizable=yes');
+                
+                if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                    alert("⚠️ Pop-up Blocked by your browser!\n\nPlease check your browser address bar (top right) and click 'Always allow pop-ups for this site' so the mobile screen can open!");
+                } else {
+                    popup.focus();
                 }
-                try {
-                    await fetch('/api/open_native_mobile', { method: 'POST' });
-                    fetchStatus();
-                } catch(e) {
-                    alert('Launch error: ' + e.message);
+
+                // If on local Windows backend, also notify backend
+                if (!status.isDocker) {
+                    try { fetch('/api/open_native_mobile', { method: 'POST' }); } catch(e) {}
                 }
             };
 
@@ -659,9 +662,9 @@
 
                                         <div className="flex flex-wrap items-center gap-2">
                                             <button
-                                                onClick={handleOpenNativeMobile}
+                                                onClick={handleOpenPopup}
                                                 className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-xs transition shadow-lg glow-gold flex items-center gap-1.5 active:scale-95">
-                                                <span>📱 Launch Window</span>
+                                                <span>📱 Open Mobile Pop-up</span>
                                             </button>
                                             {isMobileActive && (
                                                 <button
