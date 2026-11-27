@@ -207,11 +207,40 @@
 
             const handleFrameClick = (e) => {
                 if (!frameImgRef.current) return;
-                const rect = frameImgRef.current.getBoundingClientRect();
-                const scaleX = 440 / rect.width;
-                const scaleY = 956 / rect.height;
-                const x = Math.round((e.clientX - rect.left) * scaleX);
-                const y = Math.round((e.clientY - rect.top) * scaleY);
+                const img = frameImgRef.current;
+                const rect = img.getBoundingClientRect();
+
+                // Compute actual rendered dimensions of the image inside the img element
+                const imgAspect = 440 / 956;
+                const elemAspect = rect.width / rect.height;
+
+                let renderedWidth = rect.width;
+                let renderedHeight = rect.height;
+                let offsetX = 0;
+                let offsetY = 0;
+
+                if (elemAspect > imgAspect) {
+                    // Letterboxed on left and right
+                    renderedWidth = rect.height * imgAspect;
+                    offsetX = (rect.width - renderedWidth) / 2;
+                } else {
+                    // Letterboxed on top and bottom
+                    renderedHeight = rect.width / imgAspect;
+                    offsetY = (rect.height - renderedHeight) / 2;
+                }
+
+                const clickX = e.clientX - rect.left - offsetX;
+                const clickY = e.clientY - rect.top - offsetY;
+
+                if (clickX < 0 || clickX > renderedWidth || clickY < 0 || clickY > renderedHeight) {
+                    return; // clicked outside rendered image
+                }
+
+                const scaleX = 440 / renderedWidth;
+                const scaleY = 956 / renderedHeight;
+                const x = Math.round(clickX * scaleX);
+                const y = Math.round(clickY * scaleY);
+
                 sendInteractiveInput({ action: 'click', x, y });
             };
 
@@ -835,9 +864,15 @@
                                                             className="flex-1 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                                                         />
                                                         <button
-                                                            onClick={() => { if (typeInput) { sendInteractiveInput({ action: 'type', text: typeInput }); setTypeInput(''); } }}
+                                                            onClick={() => { if (typeInput) { sendInteractiveInput({ action: 'type_email', text: typeInput }); setTypeInput(''); } }}
                                                             className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
                                                             Send Email
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'click_continue' })}
+                                                            className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition"
+                                                            title="Clicks Continue on the login screen">
+                                                            👉 Continue
                                                         </button>
                                                     </div>
 
@@ -850,9 +885,15 @@
                                                             className="flex-1 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                                                         />
                                                         <button
-                                                            onClick={() => { if (passInput) { sendInteractiveInput({ action: 'type', text: passInput }); setPassInput(''); } }}
+                                                            onClick={() => { if (passInput) { sendInteractiveInput({ action: 'type_password', text: passInput }); setPassInput(''); } }}
                                                             className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
                                                             Send Password
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'key', key: 'Enter' })}
+                                                            className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition"
+                                                            title="Submits the login">
+                                                            🔑 Sign In
                                                         </button>
                                                     </div>
                                                 </div>

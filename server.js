@@ -1115,7 +1115,54 @@ async function openExactMobileWindow() {
                 const p = interactiveSession.page;
                 if (data.action === 'click') {
                     await p.mouse.click(data.x, data.y);
+                } else if (data.action === 'type_email') {
+                    // Auto-focus and input email/username
+                    await p.evaluate((text) => {
+                        const input = document.querySelector('input[type="email"], input[type="text"], input[name*="login"], input[name*="user"], input[id*="login"], input[id*="user"], input[autocomplete="username"]') ||
+                                      Array.from(document.querySelectorAll('input')).find(i => i.type !== 'hidden' && i.type !== 'password' && i.type !== 'submit');
+                        if (input) {
+                            input.focus();
+                            input.click();
+                            input.value = text;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }, data.text);
+                    await p.keyboard.type(data.text, { delay: 20 });
+                } else if (data.action === 'type_password') {
+                    // Auto-focus and input password
+                    await p.evaluate((text) => {
+                        const input = document.querySelector('input[type="password"], input[name*="pass"], input[id*="pass"]') ||
+                                      Array.from(document.querySelectorAll('input')).find(i => i.type === 'password');
+                        if (input) {
+                            input.focus();
+                            input.click();
+                            input.value = text;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }, data.text);
+                    await p.keyboard.type(data.text, { delay: 20 });
+                } else if (data.action === 'click_continue') {
+                    await p.evaluate(() => {
+                        const btns = Array.from(document.querySelectorAll('button, [role="button"], div, input[type="submit"]'));
+                        const btn = btns.find(b => /^(continue|next|sign\s*in|log\s*in)$/i.test((b.innerText || b.value || '').trim()));
+                        if (btn) btn.click();
+                    });
                 } else if (data.action === 'type') {
+                    // Auto-focus active element or first input
+                    await p.evaluate((text) => {
+                        let active = document.activeElement;
+                        if (!active || active === document.body) {
+                            active = document.querySelector('input:not([type="hidden"])');
+                            if (active) active.focus();
+                        }
+                        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                            active.value = text;
+                            active.dispatchEvent(new Event('input', { bubbles: true }));
+                            active.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }, data.text);
                     await p.keyboard.type(data.text, { delay: 25 });
                 } else if (data.action === 'key') {
                     await p.keyboard.press(data.key);
