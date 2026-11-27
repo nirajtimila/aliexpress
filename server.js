@@ -455,7 +455,18 @@ async function startInteractiveSession(startUrl = null) {
 
         try {
             interactiveSession.currentUrl = interactiveSession.page.url();
-            const cookies = await interactiveSession.page.cookies();
+            let cookies = [];
+            try {
+                if (interactiveSession.cdpClient) {
+                    const resp = await interactiveSession.cdpClient.send('Network.getAllCookies');
+                    if (resp && Array.isArray(resp.cookies) && resp.cookies.length > 0) {
+                        cookies = resp.cookies;
+                    }
+                }
+            } catch(e) {}
+            if (cookies.length === 0) {
+                cookies = await interactiveSession.page.cookies();
+            }
             const hasAuth = cookies.some(c => c.name === 'xman_t' || c.name === 'xman_us_t');
             const inLoginUrl = interactiveSession.currentUrl.includes('passport.aliexpress.com') || interactiveSession.currentUrl.includes('/login') || interactiveSession.currentUrl.includes('/join');
 
@@ -1160,6 +1171,19 @@ async function openExactMobileWindow() {
         return;
     }
 
+    // API: Serve Live Diagnostic Screenshot of Headless Mobile View
+    if (pathname === '/api/debug_screen') {
+        const debugPath = path.join(__dirname, 'debug_task_view.png');
+        if (fs.existsSync(debugPath)) {
+            res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+            fs.createReadStream(debugPath).pipe(res);
+        } else {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('No debug screenshot available yet. Trigger a task run first.');
+        }
+        return;
+    }
+
     // API: Confirm Login (Called when popup X is clicked or via 1-click connect button)
     if (pathname === '/api/confirm_login' && req.method === 'POST') {
         isConnected = true;
@@ -1251,17 +1275,44 @@ async function openExactMobileWindow() {
             return;
         }
 
+        if (isBusy) {
+            res.writeHead(429, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'A task cycle is currently already running in background.' }));
+            return;
+        }
+
+        isBusy = true;
+        currentAction = 'Running Smart Task Collector...';
         addLog("⚡ Smart Task Collector triggered: Checking Collect, Sponsored items & Viewed items...", "info");
+        
         const { runSmartCollector } = require('./smart_task_collector');
         runSmartCollector((msg, type) => addLog(msg, type)).then(res => {
+            isBusy = false;
+            currentAction = 'Idle';
             if (res && res.balance) {
                 if (res.balance.coins) accountDetails.coins = res.balance.coins;
                 if (res.balance.worth) accountDetails.worth = res.balance.worth;
                 if (res.balance.streak) accountDetails.streak = res.balance.streak;
+                accountDetails.lastCollected = new Date().toISOString();
                 saveAccountState();
+
+                lastResult.status = 'Success';
+                lastResult.message = `Cycle Complete! Balance: 🪙 ${accountDetails.coins} (${accountDetails.worth || ''})`;
+                lastResult.coins = accountDetails.coins;
+                lastResult.worth = accountDetails.worth;
+                lastResult.timestamp = new Date().toISOString();
+
                 addLog(`✓ Smart Cycle Finished! Balance: 🪙 ${accountDetails.coins} Coins (${accountDetails.worth})`, "success");
+            } else {
+                lastResult.status = 'Finished';
+                lastResult.message = 'Task cycle finished.';
+                lastResult.timestamp = new Date().toISOString();
             }
         }).catch(err => {
+            isBusy = false;
+            currentAction = 'Idle';
+            lastResult.status = 'Error';
+            lastResult.message = err.message;
             addLog(`Collection error: ${err.message}`, "error");
         });
 

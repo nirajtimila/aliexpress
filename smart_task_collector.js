@@ -138,16 +138,43 @@ async function runSmartCollector(customLogger = null) {
             const pages = await browser.pages();
             page = pages[0] || await browser.newPage();
 
-            // Inject saved session cookies if available
+            // Set Australian English locale & emulation
+            await page.setViewport({ width: 440, height: 956, isMobile: true, hasTouch: true });
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'en-AU,en-US;q=0.9,en;q=0.8'
+            });
+
+            // Inject saved session cookies via CDP Network.setCookies
             const COOKIES_FILE = path.join(__dirname, 'session_cookies.json');
             if (fs.existsSync(COOKIES_FILE)) {
                 try {
                     const rawCookies = JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
                     if (Array.isArray(rawCookies) && rawCookies.length > 0) {
-                        await page.setCookie(...rawCookies);
-                        logMsg(`✓ Restored ${rawCookies.length} session cookies from session_cookies.json.`, 'success');
+                        const client = await page.target().createCDPSession();
+                        const cdpCookies = rawCookies.map(c => {
+                            const ck = {
+                                name: c.name,
+                                value: c.value,
+                                domain: c.domain || '.aliexpress.com',
+                                path: c.path || '/'
+                            };
+                            if (c.expires && c.expires > 0) ck.expires = c.expires;
+                            if (c.httpOnly !== undefined) ck.httpOnly = Boolean(c.httpOnly);
+                            if (c.secure !== undefined) ck.secure = Boolean(c.secure);
+                            if (c.sameSite && ['Strict', 'Lax', 'None'].includes(c.sameSite)) ck.sameSite = c.sameSite;
+                            return ck;
+                        });
+                        try {
+                            await client.send('Network.setCookies', { cookies: cdpCookies });
+                            logMsg(`✓ Restored ${cdpCookies.length} session cookies via CDP Network.setCookies.`, 'success');
+                        } catch(cdpErr) {
+                            await page.setCookie(...rawCookies);
+                            logMsg(`✓ Restored ${rawCookies.length} session cookies via page.setCookie.`, 'success');
+                        }
                     }
-                } catch(e) {}
+                } catch(e) {
+                    logMsg(`⚠️ Cookie restore notice: ${e.message}`, 'warn');
+                }
             }
         } catch(err) {
             logMsg(`❌ Error launching headless browser: ${err.message}`, 'error');
@@ -214,7 +241,8 @@ async function runSmartCollector(customLogger = null) {
 
         logMsg('Navigating to AliExpress Coins Index...', 'info');
         await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
-        await sleep(4000);
+        // Allow dynamic scripts, user session, and coin animations to hydrate
+        await sleep(6000);
 
         // ==========================================
         // TASK 1: Check and Click Daily Collect Button
@@ -233,13 +261,10 @@ async function runSmartCollector(customLogger = null) {
                 el.click();
             }
 
+            const bodyText = (document.body.innerText || '').toLowerCase();
             const all = Array.from(document.querySelectorAll('*'));
-            const isAlreadyClaimed = all.some(e => {
-                const t = (e.innerText || '').trim().toLowerCase();
-                return t === 'collected' || t === 'already collected' || t === 'come back tomorrow';
-            });
-            if (isAlreadyClaimed) return { status: 'already_collected' };
 
+            // 1. Check for genuine active Collect / Check-in buttons first
             const sBtn = document.getElementById('signButton') ||
                          document.querySelector('.aecoin-checkInButton-jC2Uo') ||
                          document.querySelector('.aecoin-signButton-gaDga') ||
@@ -251,26 +276,42 @@ async function runSmartCollector(customLogger = null) {
                 return { status: 'clicked' };
             }
 
-            const btn = all.find(e => /^collect$/i.test((e.innerText || '').trim())) ||
-                        all.find(e => (e.innerText || '').toLowerCase().includes('collect') && (e.innerText || '').length < 20);
+            // Look for button or clickable element with text "Collect", "Check in", "Claim", "Get coins"
+            const btn = all.find(e => /^(collect|check[\s-]?in|claim|get\s*coins)$/i.test((e.innerText || '').trim())) ||
+                        all.find(e => {
+                            const t = (e.innerText || '').trim().toLowerCase();
+                            return (t.includes('collect') || t.includes('check in')) && t.length < 25 && !t.includes('tomorrow');
+                        });
             if (btn) {
                 smartClick(btn.closest('button, [role="button"], div') || btn);
                 return { status: 'clicked' };
+            }
+
+            // 2. Check if daily checkin is already completed:
+            // Look for "Tomorrow" in streak cards, "Signed", "Checked in", "Collected", "days streak"
+            const hasTomorrow = all.some(e => /tomorrow/i.test((e.innerText || '').trim()) && e.children.length === 0);
+            const isAlreadyClaimed = all.some(e => {
+                const t = (e.innerText || '').trim().toLowerCase();
+                return t === 'collected' || t === 'already collected' || t === 'come back tomorrow' || t === 'signed' || t === 'checked in';
+            });
+
+            if (isAlreadyClaimed || hasTomorrow || bodyText.includes('days streak')) {
+                return { status: 'already_collected' };
             }
 
             return { status: 'not_found' };
         });
 
         if (collectResult.status === 'clicked') {
-            session.tasks.dailyCollect.status = 'Claimed (+10 Coins)';
-            session.tasks.dailyCollect.details = 'Clicked orange Collect button, waited 60s';
+            session.tasks.dailyCollect.status = 'Claimed (+10 to +70 Coins)';
+            session.tasks.dailyCollect.details = 'Clicked daily check-in button, waited 60s';
             logMsg('🎉 Daily Collect button found & clicked! Waiting 60 seconds...', 'success');
             await sleep(60000);
             logMsg('✓ 60-second wait complete for Daily Collect.', 'info');
         } else if (collectResult.status === 'already_collected') {
             session.tasks.dailyCollect.status = 'Already Collected Today ✓';
-            session.tasks.dailyCollect.details = 'Streak active, nothing to claim';
-            logMsg('✓ Daily check-in was already claimed today.', 'info');
+            session.tasks.dailyCollect.details = 'Streak active, next check-in available tomorrow';
+            logMsg('✓ Daily check-in was already completed today (Streak active).', 'info');
         } else {
             session.tasks.dailyCollect.status = 'Not Found';
             session.tasks.dailyCollect.details = 'Collect button not currently visible';
@@ -278,21 +319,53 @@ async function runSmartCollector(customLogger = null) {
         }
 
         // ==========================================
+        // Helper: Multi-Step Progressive Scroll & Hydration
+        // ==========================================
+        async function hydrateAndRevealTasks() {
+            logMsg('📜 Progressively scrolling down to hydrate virtualized task items...', 'info');
+            // Scroll down in steps from 300px to 1500px to ensure lazy Weex/Rax components mount into DOM
+            for (let y = 300; y <= 1500; y += 250) {
+                await page.evaluate((pos) => window.scrollTo(0, pos), y);
+                await sleep(350);
+            }
+
+            // Check if there is an "Earn more" or expand button to click
+            await page.evaluate(() => {
+                const all = Array.from(document.querySelectorAll('*'));
+                const earnMore = all.find(e => /earn\s*more/i.test((e.innerText || '').trim()) && e.children.length === 0);
+                if (earnMore) {
+                    const clickable = earnMore.closest('button, [role="button"], div, a') || earnMore;
+                    try { clickable.click(); } catch(e) {}
+                }
+            });
+            await sleep(800);
+
+            // Frame tasks nicely in viewport
+            await page.evaluate(() => window.scrollTo(0, 800));
+            await sleep(800);
+
+            // Take and save diagnostic screenshot
+            try {
+                const debugPath = path.join(__dirname, 'debug_task_view.png');
+                await page.screenshot({ path: debugPath });
+                logMsg('📷 Saved diagnostic screenshot to debug_task_view.png', 'info');
+            } catch(e) {}
+        }
+
+        // ==========================================
         // Helper: Find, Click and Actively Browse (65s with scrolling)
         // ==========================================
-        async function runSpecificTask(taskKeyword, taskLabel) {
+        async function runSpecificTask(keywords, taskLabel) {
             logMsg(`🔍 Checking task: "${taskLabel}"...`, 'info');
             
             if (!page.url().includes('coin-index')) {
                 await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
-                await sleep(3000);
+                await sleep(4000);
             }
 
-            // Scroll down into tasks section to ensure lazy elements are hydrated
-            await page.evaluate(() => window.scrollBy(0, 350));
-            await sleep(1500);
+            await hydrateAndRevealTasks();
 
-            const taskStatus = await page.evaluate((keyword) => {
+            const taskStatus = await page.evaluate((kwList) => {
                 function smartClick(el) {
                     if (!el) return;
                     const rect = el.getBoundingClientRect();
@@ -306,32 +379,88 @@ async function runSmartCollector(customLogger = null) {
                 }
 
                 const all = Array.from(document.querySelectorAll('*'));
-                const targetText = all.find(el => {
-                    const t = (el.innerText || '').trim().toLowerCase();
-                    return t.includes(keyword.toLowerCase()) && el.children.length === 0;
-                });
 
-                if (!targetText) return { found: false, reason: 'Task title not visible' };
+                // 1. Search for title element matching any keyword in kwList
+                let matchEl = null;
+                for (const kw of kwList) {
+                    const lowerKw = kw.toLowerCase();
+                    matchEl = all.find(el => {
+                        const t = (el.innerText || '').trim().toLowerCase();
+                        return t.includes(lowerKw) && el.children.length === 0;
+                    });
+                    if (!matchEl) {
+                        matchEl = all.find(el => {
+                            const t = (el.innerText || '').trim().toLowerCase();
+                            return t.includes(lowerKw) && el.children.length <= 2 && t.length < 80;
+                        });
+                    }
+                    if (matchEl) break;
+                }
 
-                let row = targetText;
-                let btn = null;
-                for (let i = 0; i < 6; i++) {
+                if (!matchEl) {
+                    // Collect visible text snippets on the page for debugging
+                    const snippets = all
+                        .filter(e => e.children.length === 0 && (e.innerText || '').trim().length > 3 && (e.innerText || '').trim().length < 50)
+                        .map(e => e.innerText.trim())
+                        .filter(t => /earn|task|coin|explore|browse|view|order|shop|item|point/i.test(t))
+                        .slice(0, 10);
+                    return { found: false, reason: 'Task title not visible', snippets };
+                }
+
+                // 2. Climb up to the row/card container
+                let row = matchEl;
+                let actionBtn = null;
+                for (let i = 0; i < 7; i++) {
                     if (row.parentElement && row.parentElement !== document.body) {
                         row = row.parentElement;
-                        btn = Array.from(row.querySelectorAll('*')).find(c => /^\+\d+/.test((c.innerText || '').trim()) && c.children.length === 0);
-                        if (btn) break;
+                        const children = Array.from(row.querySelectorAll('*'));
+                        
+                        // Priority A: Element with +5 or +10 or +number
+                        actionBtn = children.find(c => /^\+\s*\d+/.test((c.innerText || '').trim()) && c.children.length === 0) ||
+                                    children.find(c => /^\+\s*\d+/.test((c.innerText || '').trim()) && c.children.length <= 2);
+                        
+                        // Priority B: Element with action text "Go", "Browse", "Explore", "Claim", "Start"
+                        if (!actionBtn) {
+                            actionBtn = children.find(c => /^(go|browse|explore|claim|start)$/i.test((c.innerText || '').trim()) && c.children.length === 0);
+                        }
+
+                        // Priority C: button or role="button" containing "+"
+                        if (!actionBtn) {
+                            actionBtn = children.find(c => (c.tagName === 'BUTTON' || c.getAttribute('role') === 'button') && (c.innerText || '').includes('+'));
+                        }
+
+                        if (actionBtn) break;
                     }
                 }
 
-                if (!btn) return { found: false, reason: 'Task already completed or in cooldown' };
+                const rowText = row ? row.innerText.replace(/\n+/g, ' | ') : '';
 
-                const clickable = btn.closest('[role="button"], div, button') || btn;
+                if (!actionBtn) {
+                    const isCompleted = /completed|done|\b(\d+)\/\1\b/i.test(rowText);
+                    return {
+                        found: false,
+                        reason: isCompleted ? 'Task already completed for today' : 'Action button not found in row',
+                        rowText
+                    };
+                }
+
+                // Ensure the button is scrolled into view and clickable
+                try { actionBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+                const clickable = actionBtn.closest('[role="button"], button, div') || actionBtn;
                 smartClick(clickable);
-                return { found: true, buttonText: btn.innerText.trim(), rowText: row.innerText.replace(/\n+/g, ' | ') };
-            }, taskKeyword);
+
+                return {
+                    found: true,
+                    buttonText: actionBtn.innerText.trim(),
+                    rowText: rowText.slice(0, 120)
+                };
+            }, keywords);
 
             if (!taskStatus.found) {
                 logMsg(`ℹ️ "${taskLabel}": ${taskStatus.reason}`, 'info');
+                if (taskStatus.snippets && taskStatus.snippets.length > 0) {
+                    logMsg(`   Visible page snippets: ${taskStatus.snippets.join(' | ')}`, 'info');
+                }
                 return { success: false, reason: taskStatus.reason };
             }
 
@@ -381,7 +510,8 @@ async function runSmartCollector(customLogger = null) {
         // ==========================================
         // TASK 2: Explore sponsored items (+5, up to 6x/day)
         // ==========================================
-        const sponsoredResult = await runSpecificTask('Explore sponsored items', 'Explore sponsored items');
+        const sponsoredKeywords = ['explore sponsored items', 'sponsored items', 'sponsored products', 'sponsor'];
+        const sponsoredResult = await runSpecificTask(sponsoredKeywords, 'Explore sponsored items');
         if (sponsoredResult.success) {
             session.tasks.exploreSponsored.status = `Completed (+5 Coins)`;
             session.tasks.exploreSponsored.details = `Browsed 65s with active scrolling telemetry (${sponsoredResult.details})`;
@@ -393,7 +523,8 @@ async function runSmartCollector(customLogger = null) {
         // ==========================================
         // TASK 3: Browse recently viewed items (+5)
         // ==========================================
-        const viewedResult = await runSpecificTask('Browse recently viewed items', 'Browse recently viewed items');
+        const viewedKeywords = ['browse recently viewed items', 'recently viewed items', 'viewed items', 'recently viewed', 'viewed'];
+        const viewedResult = await runSpecificTask(viewedKeywords, 'Browse recently viewed items');
         if (viewedResult.success) {
             session.tasks.browseViewed.status = `Completed (+5 Coins)`;
             session.tasks.browseViewed.details = `Browsed 65s with active scrolling telemetry (${viewedResult.details})`;
@@ -454,12 +585,23 @@ async function runSmartCollector(customLogger = null) {
             } catch(e) {}
         }
 
-        // Persist refreshed session cookies
+        // Persist refreshed session cookies (captures all domains via CDP)
         try {
-            const currentCookies = await page.cookies();
-            if (currentCookies && currentCookies.length > 0) {
+            let refreshedCookies = [];
+            try {
+                const client = await page.target().createCDPSession();
+                const res = await client.send('Network.getAllCookies');
+                if (res && Array.isArray(res.cookies) && res.cookies.length > 0) {
+                    refreshedCookies = res.cookies;
+                }
+            } catch(e) {}
+            if (refreshedCookies.length === 0) {
+                refreshedCookies = await page.cookies();
+            }
+            if (refreshedCookies && refreshedCookies.length > 0) {
                 const COOKIES_FILE = path.join(__dirname, 'session_cookies.json');
-                fs.writeFileSync(COOKIES_FILE, JSON.stringify(currentCookies, null, 2));
+                fs.writeFileSync(COOKIES_FILE, JSON.stringify(refreshedCookies, null, 2));
+                logMsg(`✓ Refreshed ${refreshedCookies.length} session cookies to session_cookies.json.`, 'info');
             }
         } catch(e) {}
 

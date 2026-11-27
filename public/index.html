@@ -611,6 +611,15 @@
                                         <LightningIcon className="w-5 h-5 text-amber-300" />
                                         <span>{isBusy ? (status.currentAction || 'Running Tasks...') : '⚡ Run Smart 1-Min Task Collector'}</span>
                                     </button>
+
+                                    <a
+                                        href="/api/debug_screen"
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="px-3.5 py-3 rounded-xl font-medium text-xs flex items-center justify-center gap-1.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition"
+                                        title="Open latest headless browser screenshot to inspect what AliExpress displays">
+                                        <span>📷 View Screen</span>
+                                    </a>
                                 </div>
 
                                 {/* 3h Auto-run toggle */}
