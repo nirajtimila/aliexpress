@@ -379,12 +379,20 @@ async function startInteractiveSession(startUrl = null) {
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
+            '--disable-blink-features=AutomationControlled',
             '--window-size=440,956'
         ]
     });
 
     const pages = await browser.pages();
     const page = pages[0] || await browser.newPage();
+
+    await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        if (!window.chrome) window.chrome = { runtime: {} };
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-AU', 'en-US', 'en'] });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    });
 
     await page.setViewport({ width: 440, height: 956, isMobile: true, hasTouch: true });
     await page.emulate(puppeteer.KnownDevices['iPhone 16 Pro Max']);
@@ -1295,10 +1303,6 @@ async function openExactMobileWindow() {
                             touchPoints: [{ x: Math.round(data.x), y: Math.round(data.y) }]
                         });
                     } catch(e) {}
-                    try {
-                        await p.mouse.move(Math.round(data.x), Math.round(data.y));
-                        await p.mouse.down();
-                    } catch(e) {}
                 } else if (data.action === 'move') {
                     const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
                     try {
@@ -1307,9 +1311,6 @@ async function openExactMobileWindow() {
                             touchPoints: [{ x: Math.round(data.x), y: Math.round(data.y) }]
                         });
                     } catch(e) {}
-                    try {
-                        await p.mouse.move(Math.round(data.x), Math.round(data.y));
-                    } catch(e) {}
                 } else if (data.action === 'up') {
                     const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
                     try {
@@ -1317,9 +1318,6 @@ async function openExactMobileWindow() {
                             type: 'touchEnd',
                             touchPoints: []
                         });
-                    } catch(e) {}
-                    try {
-                        await p.mouse.up();
                     } catch(e) {}
                 } else if (data.action === 'slide_percentage') {
                     const client = interactiveSession.cdpClient || (await p.target().createCDPSession());
