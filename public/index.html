@@ -938,15 +938,35 @@
                                                             🔑 Sign In
                                                         </button>
                                                     </div>
+
+                                                    <button
+                                                        onClick={() => {
+                                                            if (typeInput || passInput) {
+                                                                sendInteractiveInput({ action: 'autofill_login', email: typeInput, password: passInput });
+                                                                setTypeInput('');
+                                                                setPassInput('');
+                                                            }
+                                                        }}
+                                                        className="w-full py-2 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow transition active:scale-95">
+                                                        <span>⚡ 1-Click Auto-Fill Email, Continue & Password</span>
+                                                    </button>
                                                 </div>
 
                                                 <div className="pt-2 border-t border-slate-800 space-y-2.5">
-                                                    <button
-                                                        onClick={() => sendInteractiveInput({ action: 'auto_slide' })}
-                                                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
-                                                        title="Automatically slides the verification puzzle slider from left to right">
-                                                        <span>➡️ ✨ Auto-Slide to Verify</span>
-                                                    </button>
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'auto_slide' })}
+                                                            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
+                                                            title="Automatically slides the verification puzzle slider from left to right">
+                                                            <span>➡️ ✨ Auto-Slide to Verify</span>
+                                                        </button>
+                                                        <button
+                                                            onClick={() => startInteractive()}
+                                                            className="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1 transition"
+                                                            title="Reloads a fresh login session">
+                                                            <span>🔄 Reset Page</span>
+                                                        </button>
+                                                    </div>
 
                                                     {/* Manual Draggable HTML Slider */}
                                                     <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-700/80 space-y-1.5">

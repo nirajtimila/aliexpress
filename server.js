@@ -437,6 +437,7 @@ async function startInteractiveSession(startUrl = null) {
     } catch(e) {}
 
     const targetUrl = startUrl || 'https://login.aliexpress.com/?return_url=https%3A%2F%2Fm.aliexpress.com%2Fp%2Fcoin-index%2Findex.html%3F_immersiveMode%3Dtrue%26from%3Dpc302';
+    interactiveSession.startTime = Date.now();
     page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
 
     // Polling loop to detect login completion
@@ -468,9 +469,23 @@ async function startInteractiveSession(startUrl = null) {
                 cookies = await interactiveSession.page.cookies();
             }
             const hasAuth = cookies.some(c => c.name === 'xman_t' || c.name === 'xman_us_t');
-            const inLoginUrl = interactiveSession.currentUrl.includes('passport.aliexpress.com') || interactiveSession.currentUrl.includes('/login') || interactiveSession.currentUrl.includes('/join');
+            const url = interactiveSession.currentUrl || '';
+            const isInitialUrl = !url || url === 'about:blank';
+            const inLoginUrl = isInitialUrl || 
+                url.includes('passport.aliexpress.com') || 
+                url.includes('/login') || 
+                url.includes('/join') || 
+                url.includes('ug-login-page') ||
+                url.includes('login.aliexpress.com');
 
-            if (hasAuth && !inLoginUrl) {
+            const sessionAge = Date.now() - (interactiveSession.startTime || 0);
+            const isOnSuccessPage = url.includes('coin-index') || 
+                url.includes('aliexpress.com/p/') || 
+                url.includes('aliexpress.com/home.html') ||
+                (url.includes('aliexpress.com') && !inLoginUrl);
+
+            // Require at least 8 seconds of session runtime AND completely out of login URL
+            if (hasAuth && !inLoginUrl && isOnSuccessPage && sessionAge > 8000) {
                 clearInterval(checkInterval);
                 const acc = parseAccountCookies(cookies);
                 fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
@@ -1116,33 +1131,39 @@ async function openExactMobileWindow() {
                 if (data.action === 'click') {
                     await p.mouse.click(data.x, data.y);
                 } else if (data.action === 'type_email') {
-                    // Auto-focus and input email/username
+                    // Auto-focus and cleanly input email/username via React synthetic setter + real keystrokes
                     await p.evaluate((text) => {
                         const input = document.querySelector('input[type="email"], input[type="text"], input[name*="login"], input[name*="user"], input[id*="login"], input[id*="user"], input[autocomplete="username"]') ||
                                       Array.from(document.querySelectorAll('input')).find(i => i.type !== 'hidden' && i.type !== 'password' && i.type !== 'submit');
                         if (input) {
                             input.focus();
                             input.click();
-                            input.value = text;
+                            const lastVal = input.value;
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                            if (setter) setter.call(input, text);
+                            else input.value = text;
+                            if (input._valueTracker) input._valueTracker.setValue(lastVal);
                             input.dispatchEvent(new Event('input', { bubbles: true }));
                             input.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     }, data.text);
-                    await p.keyboard.type(data.text, { delay: 20 });
                 } else if (data.action === 'type_password') {
-                    // Auto-focus and input password
+                    // Auto-focus and cleanly input password
                     await p.evaluate((text) => {
                         const input = document.querySelector('input[type="password"], input[name*="pass"], input[id*="pass"]') ||
                                       Array.from(document.querySelectorAll('input')).find(i => i.type === 'password');
                         if (input) {
                             input.focus();
                             input.click();
-                            input.value = text;
+                            const lastVal = input.value;
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                            if (setter) setter.call(input, text);
+                            else input.value = text;
+                            if (input._valueTracker) input._valueTracker.setValue(lastVal);
                             input.dispatchEvent(new Event('input', { bubbles: true }));
                             input.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     }, data.text);
-                    await p.keyboard.type(data.text, { delay: 20 });
                 } else if (data.action === 'click_continue') {
                     await p.evaluate(() => {
                         const btns = Array.from(document.querySelectorAll('button, [role="button"], div, input[type="submit"]'));
@@ -1155,15 +1176,89 @@ async function openExactMobileWindow() {
                         let active = document.activeElement;
                         if (!active || active === document.body) {
                             active = document.querySelector('input:not([type="hidden"])');
-                            if (active) active.focus();
                         }
                         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
-                            active.value = text;
+                            active.focus();
+                            const lastVal = active.value;
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                            if (setter) setter.call(active, text);
+                            else active.value = text;
+                            if (active._valueTracker) active._valueTracker.setValue(lastVal);
                             active.dispatchEvent(new Event('input', { bubbles: true }));
                             active.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     }, data.text);
-                    await p.keyboard.type(data.text, { delay: 25 });
+                } else if (data.action === 'eval') {
+                    let evalResult = null;
+                    try {
+                        evalResult = await p.evaluate((codeStr) => {
+                            try { return eval(codeStr); } catch(e) { return { error: e.message }; }
+                        }, data.code);
+                    } catch(err) {
+                        evalResult = { error: err.message };
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, result: evalResult }));
+                    return;
+                } else if (data.action === 'autofill_login') {
+                    const email = data.email || '';
+                    const pass = data.password || '';
+
+                    // 1. Fill email
+                    await p.evaluate((em) => {
+                        const input = document.querySelector('input[type="email"], input[type="text"], input[name*="login"], input[name*="user"], input[id*="login"], input[id*="user"], input[autocomplete="username"]') ||
+                                      Array.from(document.querySelectorAll('input')).find(i => i.type !== 'hidden' && i.type !== 'password' && i.type !== 'submit');
+                        if (input) {
+                            input.focus();
+                            input.click();
+                            const lastVal = input.value;
+                            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                            if (setter) setter.call(input, em);
+                            else input.value = em;
+                            if (input._valueTracker) input._valueTracker.setValue(lastVal);
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }, email);
+
+                    // 2. Click continue
+                    await new Promise(r => setTimeout(r, 800));
+                    await p.evaluate(() => {
+                        const btns = Array.from(document.querySelectorAll('button, [role="button"], div, input[type="submit"]'));
+                        const btn = btns.find(b => /^(continue|next|sign\s*in|log\s*in)$/i.test((b.innerText || b.value || '').trim()));
+                        if (btn) btn.click();
+                    });
+
+                    // 3. Wait for password field and fill
+                    if (pass) {
+                        for (let t = 0; t < 10; t++) {
+                            await new Promise(r => setTimeout(r, 500));
+                            const hasPass = await p.evaluate(() => !!document.querySelector('input[type="password"]'));
+                            if (hasPass) {
+                                await p.evaluate((pwd) => {
+                                    const passInput = document.querySelector('input[type="password"]');
+                                    if (passInput) {
+                                        passInput.focus();
+                                        passInput.click();
+                                        const lastVal = passInput.value;
+                                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                                        if (setter) setter.call(passInput, pwd);
+                                        else passInput.value = pwd;
+                                        if (passInput._valueTracker) passInput._valueTracker.setValue(lastVal);
+                                        passInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                        passInput.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                }, pass);
+                                await new Promise(r => setTimeout(r, 600));
+                                await p.keyboard.press('Enter');
+                                break;
+                            }
+                        }
+                    }
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true }));
+                    return;
                 } else if (data.action === 'key') {
                     await p.keyboard.press(data.key);
                 } else if (data.action === 'scroll') {
