@@ -1,6 +1,8 @@
 services:
-  aliexpress-collector:
+  aliexpress-collector-v3:
     build: .
+    image: aliexpress-collector:v3
+    pull_policy: build
     container_name: aliexpress-coins
     restart: unless-stopped
     ports:
