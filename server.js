@@ -332,6 +332,155 @@ async function openLoginWindow() {
     }
 }
 
+// ==========================================
+// Virtual Browser Screencast Interactive Login Session
+// ==========================================
+let interactiveSession = {
+    active: false,
+    browser: null,
+    page: null,
+    cdpClient: null,
+    latestFrame: null,
+    currentUrl: '',
+    lastActivity: Date.now(),
+    loggedIn: false,
+    account: null
+};
+
+async function stopInteractiveSession() {
+    if (!interactiveSession.active && !interactiveSession.browser) return;
+    interactiveSession.active = false;
+    interactiveSession.latestFrame = null;
+    if (interactiveSession.cdpClient) {
+        try { await interactiveSession.cdpClient.send('Page.stopScreencast'); } catch(e) {}
+        interactiveSession.cdpClient = null;
+    }
+    if (interactiveSession.browser) {
+        try { await interactiveSession.browser.close(); } catch(e) {}
+        interactiveSession.browser = null;
+        interactiveSession.page = null;
+    }
+    addLog("🔒 Virtual login session closed.", "info");
+}
+
+async function startInteractiveSession(startUrl = null) {
+    await stopInteractiveSession();
+
+    addLog("🚀 Launching interactive virtual browser inside dashboard...", "info");
+    const isHeadless = process.env.DOCKER === 'true' || process.env.HEADLESS === 'true' || process.platform !== 'win32';
+    const chromiumPath = process.env.PUPPETEER_EXECUTABLE_PATH ||
+        (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' :
+        (fs.existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : CHROME_PATH));
+
+    const browser = await puppeteer.launch({
+        executablePath: chromiumPath,
+        headless: 'new',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--window-size=440,956'
+        ]
+    });
+
+    const pages = await browser.pages();
+    const page = pages[0] || await browser.newPage();
+
+    await page.setViewport({ width: 440, height: 956, isMobile: true, hasTouch: true });
+    await page.emulate(puppeteer.KnownDevices['iPhone 16 Pro Max']);
+
+    const cdpClient = await page.target().createCDPSession();
+    await cdpClient.send('Network.setUserAgentOverride', {
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        platform: 'iPhone',
+        userAgentMetadata: {
+            mobile: true,
+            platform: 'iOS',
+            platformVersion: '17.0',
+            architecture: '',
+            model: 'iPhone',
+            brands: []
+        }
+    });
+
+    interactiveSession = {
+        active: true,
+        browser,
+        page,
+        cdpClient,
+        latestFrame: null,
+        currentUrl: '',
+        lastActivity: Date.now(),
+        loggedIn: false,
+        account: null
+    };
+
+    await cdpClient.send('Page.startScreencast', {
+        format: 'jpeg',
+        quality: 65,
+        maxWidth: 440,
+        maxHeight: 956,
+        everyNthFrame: 1
+    });
+
+    cdpClient.on('Page.screencastFrame', async ({ data, sessionId }) => {
+        interactiveSession.latestFrame = data;
+        try {
+            await cdpClient.send('Page.screencastFrameAck', { sessionId });
+        } catch(e) {}
+    });
+
+    const targetUrl = startUrl || 'https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302';
+    page.goto(targetUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+
+    // Polling loop to detect login completion
+    const checkInterval = setInterval(async () => {
+        if (!interactiveSession.active || !interactiveSession.page) {
+            clearInterval(checkInterval);
+            return;
+        }
+
+        // Auto-close after 10 minutes of inactivity
+        if (Date.now() - interactiveSession.lastActivity > 10 * 60 * 1000) {
+            clearInterval(checkInterval);
+            await stopInteractiveSession();
+            return;
+        }
+
+        try {
+            interactiveSession.currentUrl = interactiveSession.page.url();
+            const cookies = await interactiveSession.page.cookies();
+            const hasAuth = cookies.some(c => c.name === 'xman_t' || c.name === 'xman_us_t');
+            const inLoginUrl = interactiveSession.currentUrl.includes('passport.aliexpress.com') || interactiveSession.currentUrl.includes('/login') || interactiveSession.currentUrl.includes('/join');
+
+            if (hasAuth && !inLoginUrl) {
+                clearInterval(checkInterval);
+                const acc = parseAccountCookies(cookies);
+                fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+
+                if (acc.email) accountDetails.email = acc.email;
+                if (acc.userId) accountDetails.userId = acc.userId;
+                if (acc.region) accountDetails.region = acc.region;
+                if (acc.currency) accountDetails.currency = acc.currency;
+                isConnected = true;
+                saveAccountState();
+
+                interactiveSession.loggedIn = true;
+                interactiveSession.account = accountDetails;
+
+                addLog(`🎉 SUCCESSFUL LOGIN! Connected as: ${accountDetails.email || accountDetails.userId || 'User'} (${accountDetails.region})`, "success");
+
+                setTimeout(async () => {
+                    await stopInteractiveSession();
+                }, 3500);
+            }
+        } catch(e) {}
+    }, 1500);
+
+    return { success: true };
+}
+
 /**
  * 2. Connect via Cookies (Instant 1-Click Paste / Sync / JSON)
  */
@@ -890,6 +1039,94 @@ async function openExactMobileWindow() {
         } catch(e) {}
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ isMobileOpen }));
+        return;
+    }
+
+    // ==========================================
+    // Interactive Screencast API Endpoints
+    // ==========================================
+    // API: Start Virtual Interactive Browser Login
+    if (pathname === '/api/interactive/start') {
+        startInteractiveSession().then(() => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        }).catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        });
+        return;
+    }
+
+    // API: Stop Virtual Interactive Browser Login
+    if (pathname === '/api/interactive/stop') {
+        stopInteractiveSession().then(() => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+        }).catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+        });
+        return;
+    }
+
+    // API: Get Latest Screencast Frame & Session Status
+    if (pathname === '/api/interactive/frame') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            active: interactiveSession.active,
+            frame: interactiveSession.latestFrame,
+            url: interactiveSession.currentUrl,
+            loggedIn: interactiveSession.loggedIn,
+            account: interactiveSession.account
+        }));
+        return;
+    }
+
+    // API: Dispatch User Interaction (Click, Drag, Type, Key, Scroll, Navigate)
+    if (pathname === '/api/interactive/input') {
+        if (!interactiveSession.active || !interactiveSession.page) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'No active session' }));
+            return;
+        }
+        interactiveSession.lastActivity = Date.now();
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+            try {
+                const data = JSON.parse(body);
+                const p = interactiveSession.page;
+                if (data.action === 'click') {
+                    await p.mouse.click(data.x, data.y);
+                } else if (data.action === 'type') {
+                    await p.keyboard.type(data.text, { delay: 25 });
+                } else if (data.action === 'key') {
+                    await p.keyboard.press(data.key);
+                } else if (data.action === 'scroll') {
+                    await p.mouse.wheel({ deltaY: data.deltaY || 200 });
+                } else if (data.action === 'drag') {
+                    await p.mouse.move(data.startX, data.startY);
+                    await p.mouse.down();
+                    const steps = 12;
+                    for (let i = 1; i <= steps; i++) {
+                        const cx = data.startX + (data.endX - data.startX) * (i / steps);
+                        const cy = data.startY + (data.endY - data.startY) * (i / steps);
+                        await p.mouse.move(cx, cy);
+                        await new Promise(r => setTimeout(r, 20));
+                    }
+                    await p.mouse.up();
+                } else if (data.action === 'navigate') {
+                    if (data.url) {
+                        await p.goto(data.url, { waitUntil: 'domcontentloaded' });
+                    }
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch(err) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: err.message }));
+            }
+        });
         return;
     }
 

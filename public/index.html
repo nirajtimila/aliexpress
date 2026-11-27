@@ -116,7 +116,7 @@
             const [cookieInput, setCookieInput] = useState('');
             const [connectingCookie, setConnectingCookie] = useState(false);
             const [cookieMsg, setCookieMsg] = useState(null);
-            const [activeTab, setActiveTab] = useState('mobile'); // Default to Direct Mobile Integration
+            const [activeTab, setActiveTab] = useState('virtual'); // Default to Virtual Browser Login
             const [isMobileActive, setIsMobileActive] = useState(false);
             const [copyStatus, setCopyStatus] = useState('Copy 1-Click Bookmarklet');
             const [editingCoins, setEditingCoins] = useState(false);
@@ -125,6 +125,95 @@
             const [viewingRawLog, setViewingRawLog] = useState(false);
             const [rawLogText, setRawLogText] = useState('');
             const logContainerRef = useRef(null);
+
+            // Interactive Virtual Browser Login State
+            const [interactiveActive, setInteractiveActive] = useState(false);
+            const [interactiveFrame, setInteractiveFrame] = useState(null);
+            const [interactiveUrl, setInteractiveUrl] = useState('');
+            const [interactiveLoggedIn, setInteractiveLoggedIn] = useState(false);
+            const [interactiveStarting, setInteractiveStarting] = useState(false);
+            const [typeInput, setTypeInput] = useState('');
+            const [passInput, setPassInput] = useState('');
+            const frameImgRef = useRef(null);
+            const pollingTimerRef = useRef(null);
+
+            const startInteractive = async (customUrl = null) => {
+                setInteractiveStarting(true);
+                setInteractiveLoggedIn(false);
+                try {
+                    const res = await fetch('/api/interactive/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: customUrl })
+                    });
+                    if (res.ok) {
+                        setInteractiveActive(true);
+                        startPollingFrames();
+                    } else {
+                        alert('Could not start interactive browser.');
+                    }
+                } catch(e) {
+                    alert('Error: ' + e.message);
+                } finally {
+                    setInteractiveStarting(false);
+                }
+            };
+
+            const stopInteractive = async () => {
+                if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
+                try {
+                    await fetch('/api/interactive/stop', { method: 'POST' });
+                } catch(e) {}
+                setInteractiveActive(false);
+                setInteractiveFrame(null);
+                fetchStatus();
+            };
+
+            const startPollingFrames = () => {
+                if (pollingTimerRef.current) clearInterval(pollingTimerRef.current);
+                pollingTimerRef.current = setInterval(async () => {
+                    try {
+                        const res = await fetch('/api/interactive/frame');
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data.active) {
+                                if (data.frame) setInteractiveFrame(data.frame);
+                                if (data.url) setInteractiveUrl(data.url);
+                                if (data.loggedIn) {
+                                    setInteractiveLoggedIn(true);
+                                    setTimeout(() => {
+                                        stopInteractive();
+                                        fetchStatus();
+                                    }, 3500);
+                                }
+                            } else if (!data.loggedIn) {
+                                clearInterval(pollingTimerRef.current);
+                                setInteractiveActive(false);
+                            }
+                        }
+                    } catch(e) {}
+                }, 200);
+            };
+
+            const sendInteractiveInput = async (payload) => {
+                try {
+                    await fetch('/api/interactive/input', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } catch(e) {}
+            };
+
+            const handleFrameClick = (e) => {
+                if (!frameImgRef.current) return;
+                const rect = frameImgRef.current.getBoundingClientRect();
+                const scaleX = 440 / rect.width;
+                const scaleY = 956 / rect.height;
+                const x = Math.round((e.clientX - rect.left) * scaleX);
+                const y = Math.round((e.clientY - rect.top) * scaleY);
+                sendInteractiveInput({ action: 'click', x, y });
+            };
 
             const fetchHistory = async () => {
                 try {
@@ -599,13 +688,20 @@
                             </div>
 
                             {/* Tabs */}
-                            <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800">
+                            <div className="flex bg-slate-900/80 p-1 rounded-xl border border-slate-800 flex-wrap gap-1">
+                                <button
+                                    onClick={() => setActiveTab('virtual')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                                        activeTab === 'virtual' ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
+                                    }`}>
+                                    🖥️ Virtual Browser Login
+                                </button>
                                 <button
                                     onClick={() => setActiveTab('mobile')}
                                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
                                         activeTab === 'mobile' ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-white'
                                     }`}>
-                                    📱 Exact Mobile Screen (Integrated)
+                                    📱 Mobile Pop-up
                                 </button>
                                 <button
                                     onClick={() => setActiveTab('bookmarklet')}
@@ -623,6 +719,182 @@
                                 </button>
                             </div>
                         </div>
+
+                        {/* Tab 0: Virtual Browser Login (SOLUTION 2) */}
+                        {activeTab === 'virtual' && (
+                            <div className="space-y-4">
+                                {/* Banner */}
+                                <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-sm font-bold text-white flex items-center gap-2">
+                                            <span>🖥️ Interactive Virtual Browser (Type & Auto-Save Cookies)</span>
+                                            <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
+                                                Auto-Capture
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-slate-300 mt-0.5">
+                                            Opens a virtual phone screen right on this page. Type your username/password and log in. Once logged in, your cookies are captured and saved to the server automatically!
+                                        </div>
+                                    </div>
+                                    {!interactiveActive ? (
+                                        <button
+                                            onClick={() => startInteractive()}
+                                            disabled={interactiveStarting}
+                                            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-extrabold text-xs transition shadow-lg glow-gold flex items-center gap-2 active:scale-95 whitespace-nowrap">
+                                            {interactiveStarting ? <RefreshIcon className="w-4 h-4 animate-spin" /> : <span>🚀 Launch Virtual Login Screen</span>}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            onClick={stopInteractive}
+                                            className="px-4 py-2 rounded-xl bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-500/40 font-bold text-xs transition flex items-center gap-1.5 whitespace-nowrap">
+                                            <span>✕ Close Session</span>
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Live Interactive Screen Container */}
+                                {interactiveActive && (
+                                    <div className="p-6 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-8">
+                                        {/* iPhone Frame */}
+                                        <div className="flex flex-col items-center">
+                                            <div className="relative rounded-[38px] p-3 bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 shadow-2xl border-2 border-slate-600/60">
+                                                {/* Speaker Notch */}
+                                                <div className="absolute top-4 left-1/2 -translate-x-1/2 w-28 h-4 bg-slate-950 rounded-full z-20 flex items-center justify-center">
+                                                    <div className="w-8 h-1 bg-slate-800 rounded-full"></div>
+                                                </div>
+
+                                                {/* Screen */}
+                                                <div className="relative w-[340px] sm:w-[380px] h-[680px] sm:h-[760px] bg-black rounded-[30px] overflow-hidden border border-slate-900 flex items-center justify-center">
+                                                    {interactiveFrame ? (
+                                                        <img
+                                                            ref={frameImgRef}
+                                                            src={`data:image/jpeg;base64,${interactiveFrame}`}
+                                                            onClick={handleFrameClick}
+                                                            alt="AliExpress Live Virtual Screen"
+                                                            className="w-full h-full object-contain cursor-pointer select-none"
+                                                        />
+                                                    ) : (
+                                                        <div className="flex flex-col items-center justify-center text-slate-400 text-xs p-6 text-center space-y-3">
+                                                            <RefreshIcon className="w-8 h-8 text-emerald-400 animate-spin" />
+                                                            <span>Connecting to AliExpress mobile screen...</span>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Success Overlay when logged in */}
+                                                    {interactiveLoggedIn && (
+                                                        <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30">
+                                                            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-3xl mb-3">
+                                                                🎉
+                                                            </div>
+                                                            <h3 className="text-lg font-bold text-white mb-1">LOGIN DETECTED!</h3>
+                                                            <p className="text-xs text-emerald-400 mb-2 font-semibold">
+                                                                Session cookies captured & saved successfully!
+                                                            </p>
+                                                            <p className="text-[11px] text-slate-400">
+                                                                Closing virtual screen in 3 seconds...
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="text-[11px] text-slate-400 mt-3 text-center">
+                                                💡 <strong>Click anywhere</strong> on the phone screen to tap buttons, fields, or links.
+                                            </div>
+                                        </div>
+
+                                        {/* Control & Quick Typing Panel */}
+                                        <div className="w-full lg:w-96 space-y-4">
+                                            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+                                                <div className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                                                    <span>⌨️ Quick-Type Helper</span>
+                                                    <span className="text-[10px] text-slate-400 font-normal">(Instant text sending)</span>
+                                                </div>
+                                                <p className="text-[11px] text-slate-400">
+                                                    First tap the email or password box on the phone screen, then type here and click Send:
+                                                </p>
+
+                                                <div className="space-y-2.5">
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Enter your Email / Username"
+                                                            value={typeInput}
+                                                            onChange={(e) => setTypeInput(e.target.value)}
+                                                            className="flex-1 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                                                        />
+                                                        <button
+                                                            onClick={() => { if (typeInput) { sendInteractiveInput({ action: 'type', text: typeInput }); setTypeInput(''); } }}
+                                                            className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
+                                                            Send Email
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="password"
+                                                            placeholder="Enter your Password"
+                                                            value={passInput}
+                                                            onChange={(e) => setPassInput(e.target.value)}
+                                                            className="flex-1 px-3 py-2 text-xs rounded-lg bg-slate-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                                                        />
+                                                        <button
+                                                            onClick={() => { if (passInput) { sendInteractiveInput({ action: 'type', text: passInput }); setPassInput(''); } }}
+                                                            className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition">
+                                                            Send Password
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-2">
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'key', key: 'Enter' })}
+                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                        ↵ Enter
+                                                    </button>
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'key', key: 'Backspace' })}
+                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                        ⌫ Backspace
+                                                    </button>
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: 250 })}
+                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                        ⬇ Scroll Down
+                                                    </button>
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: -250 })}
+                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                        ⬆ Scroll Up
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+                                                <div className="text-xs font-bold text-slate-300">Quick Navigation:</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'navigate', url: 'https://login.aliexpress.com/' })}
+                                                        className="px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-800/60 border border-blue-500/30 text-xs font-medium text-blue-300 transition">
+                                                        🔑 Direct Login Page
+                                                    </button>
+                                                    <button
+                                                        onClick={() => sendInteractiveInput({ action: 'navigate', url: 'https://m.aliexpress.com/p/coin-index/index.html?_immersiveMode=true&from=pc302' })}
+                                                        className="px-3 py-1.5 rounded-lg bg-amber-900/40 hover:bg-amber-800/60 border border-amber-500/30 text-xs font-medium text-amber-300 transition">
+                                                        🪙 Coin Index
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                                                <div className="font-semibold text-slate-300">🛡️ How Auto-Save Works:</div>
+                                                <div>The server continuously watches for your login tokens (<code className="text-amber-400">xman_t</code>). As soon as AliExpress confirms your login, all cookies are captured, written to <code className="text-emerald-400">session_cookies.json</code>, and the screen automatically closes.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Tab 1: Exact Mobile Screen (PRIMARY INTEGRATED) */}
                         {activeTab === 'mobile' && (
