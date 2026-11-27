@@ -774,7 +774,8 @@ const server = http.createServer(async (req, res) => {
             accountDetails,
             lastResult,
             autoSchedule,
-            logs
+            logs,
+            isDocker: process.env.DOCKER === 'true' || process.platform !== 'win32'
         }));
         return;
     }
@@ -802,6 +803,10 @@ function closeAllMobileWindowsSync() {
 }
 
 async function openExactMobileWindow() {
+    if (process.env.DOCKER === 'true' || process.platform !== 'win32') {
+        addLog("🐳 Running in Docker / Headless Server Mode. Browser runs virtually in memory without a physical monitor. Click 'Collect & Sync Now' to claim coins!", "info");
+        return;
+    }
     const { exec } = require('child_process');
     let isConnected = false;
     try {

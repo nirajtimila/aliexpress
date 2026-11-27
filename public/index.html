@@ -236,6 +236,10 @@
 
             // Launch the exact standalone mobile window with iPhone UA via desktop integration
             const handleOpenNativeMobile = async () => {
+                if (status.isDocker) {
+                    alert("🐳 Docker / Server Mode Active!\n\nYour server runs Chromium headlessly in memory without a physical monitor.\n\nTo claim coins, click the green 'Collect & Sync Now' button or let the 3-hour auto-scheduler run automatically in the background.");
+                    return;
+                }
                 try {
                     await fetch('/api/open_native_mobile', { method: 'POST' });
                     fetchStatus();
@@ -629,7 +633,12 @@
                                             <div>
                                                 <div className="text-sm font-bold text-white flex items-center gap-2">
                                                     <span>iPhone 16 Pro Max Standalone Emulation</span>
-                                                    {isMobileActive ? (
+                                                    {status.isDocker ? (
+                                                        <span className="px-2 py-0.5 rounded-full bg-blue-950 border border-blue-500/60 text-blue-300 text-[10px] font-extrabold flex items-center gap-1">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                                                            DOCKER SERVER (HEADLESS)
+                                                        </span>
+                                                    ) : isMobileActive ? (
                                                         <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/60 text-emerald-400 text-[10px] font-extrabold flex items-center gap-1">
                                                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                                                             ONLINE (Port 9222)
@@ -641,7 +650,9 @@
                                                     )}
                                                 </div>
                                                 <div className="text-xs text-slate-400">
-                                                    440 x 956 Standalone Window • Contains Orange Collect Button & Bonus Tasks
+                                                    {status.isDocker 
+                                                        ? 'Virtual Headless Browser • Claims Daily Coins & Bonus Tasks 24/7 in Background'
+                                                        : '440 x 956 Standalone Window • Contains Orange Collect Button & Bonus Tasks'}
                                                 </div>
                                             </div>
                                         </div>
