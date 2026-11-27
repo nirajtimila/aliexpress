@@ -205,12 +205,13 @@
                 } catch(e) {}
             };
 
-            const handleFrameClick = (e) => {
-                if (!frameImgRef.current) return;
+            const [dragStart, setDragStart] = useState(null);
+
+            const getCanvasCoords = (e) => {
+                if (!frameImgRef.current) return null;
                 const img = frameImgRef.current;
                 const rect = img.getBoundingClientRect();
 
-                // Compute actual rendered dimensions of the image inside the img element
                 const imgAspect = 440 / 956;
                 const elemAspect = rect.width / rect.height;
 
@@ -220,11 +221,9 @@
                 let offsetY = 0;
 
                 if (elemAspect > imgAspect) {
-                    // Letterboxed on left and right
                     renderedWidth = rect.height * imgAspect;
                     offsetX = (rect.width - renderedWidth) / 2;
                 } else {
-                    // Letterboxed on top and bottom
                     renderedHeight = rect.width / imgAspect;
                     offsetY = (rect.height - renderedHeight) / 2;
                 }
@@ -233,15 +232,40 @@
                 const clickY = e.clientY - rect.top - offsetY;
 
                 if (clickX < 0 || clickX > renderedWidth || clickY < 0 || clickY > renderedHeight) {
-                    return; // clicked outside rendered image
+                    return null;
                 }
 
                 const scaleX = 440 / renderedWidth;
                 const scaleY = 956 / renderedHeight;
-                const x = Math.round(clickX * scaleX);
-                const y = Math.round(clickY * scaleY);
+                return {
+                    x: Math.round(clickX * scaleX),
+                    y: Math.round(clickY * scaleY)
+                };
+            };
 
-                sendInteractiveInput({ action: 'click', x, y });
+            const handleMouseDown = (e) => {
+                const coords = getCanvasCoords(e);
+                if (coords) setDragStart(coords);
+            };
+
+            const handleMouseUp = (e) => {
+                if (!dragStart) return;
+                const coords = getCanvasCoords(e);
+                if (coords) {
+                    const dist = Math.hypot(coords.x - dragStart.x, coords.y - dragStart.y);
+                    if (dist > 15) {
+                        sendInteractiveInput({
+                            action: 'drag',
+                            startX: dragStart.x,
+                            startY: dragStart.y,
+                            endX: coords.x,
+                            endY: coords.y
+                        });
+                    } else {
+                        sendInteractiveInput({ action: 'click', x: coords.x, y: coords.y });
+                    }
+                }
+                setDragStart(null);
             };
 
             const fetchHistory = async () => {
@@ -809,9 +833,11 @@
                                                         <img
                                                             ref={frameImgRef}
                                                             src={`data:image/jpeg;base64,${interactiveFrame}`}
-                                                            onClick={handleFrameClick}
+                                                            onMouseDown={handleMouseDown}
+                                                            onMouseUp={handleMouseUp}
                                                             alt="AliExpress Live Virtual Screen"
                                                             className="w-full h-full object-contain cursor-pointer select-none"
+                                                            draggable={false}
                                                         />
                                                     ) : (
                                                         <div className="flex flex-col items-center justify-center text-slate-400 text-xs p-6 text-center space-y-3">
@@ -898,27 +924,36 @@
                                                     </div>
                                                 </div>
 
-                                                <div className="pt-2 border-t border-slate-800 flex flex-wrap gap-2">
+                                                <div className="pt-2 border-t border-slate-800 space-y-2">
                                                     <button
-                                                        onClick={() => sendInteractiveInput({ action: 'key', key: 'Enter' })}
-                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
-                                                        ↵ Enter
+                                                        onClick={() => sendInteractiveInput({ action: 'auto_slide' })}
+                                                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition active:scale-95"
+                                                        title="Automatically slides the verification puzzle slider from left to right">
+                                                        <span>➡️ ✨ Auto-Slide to Verify</span>
                                                     </button>
-                                                    <button
-                                                        onClick={() => sendInteractiveInput({ action: 'key', key: 'Backspace' })}
-                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
-                                                        ⌫ Backspace
-                                                    </button>
-                                                    <button
-                                                        onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: 250 })}
-                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
-                                                        ⬇ Scroll Down
-                                                    </button>
-                                                    <button
-                                                        onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: -250 })}
-                                                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
-                                                        ⬆ Scroll Up
-                                                    </button>
+
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'key', key: 'Enter' })}
+                                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                            ↵ Enter
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'key', key: 'Backspace' })}
+                                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                            ⌫ Backspace
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: 250 })}
+                                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                            ⬇ Scroll Down
+                                                        </button>
+                                                        <button
+                                                            onClick={() => sendInteractiveInput({ action: 'scroll', deltaY: -250 })}
+                                                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition">
+                                                            ⬆ Scroll Up
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             </div>
 
