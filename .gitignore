@@ -1,8 +1,37 @@
+# Node & Dependencies
 node_modules/
+package-lock.json
+
+# User Credentials, Accounts, Sessions & Cookies
+account.json
+session_cookies.json
+decrypted_aliexpress_cookies.json
+activity_history.json
+credentials.json
+*.session
+*.cookie
+*.cookies
+
+# Logs & History
+*.log
+*.jsonl
+collector_activity.log
+
+# Screenshots & Screen Captures
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.ico
+
+# Chrome Profiles & Sessions
 chrome_mobile_session/
 chrome_session/
 chrome_mobile_profile/
-*.log
-*.png
-.gemini/
+chrome_mobile_isolated/
+
+# Environment & Sensitive configs
 .env
+.env.*
+.gemini/
